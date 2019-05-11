@@ -1,17 +1,190 @@
+#define _USE_MATH_DEFINES
+#include <cmath>
+#include <complex>
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 #include <sstream>
 #include <iostream>
 #include <functional>
-#include <numeric>
-#include <ctime>
+#include <chrono>
 #include <unordered_map>
-#include "polynomial.hpp"
+#include <array>
+#include <numeric>
 
+std::ostream& operator<<(std::ostream& os, const std::vector<int32_t>& v)
+{
+	std::stringstream ss;
+	if (v.size() > 0)
+	{
+		ss << '[';
+
+		for (size_t n = 0; n < v.size(); ++n)
+		{
+			ss << v.at(n);
+			if (v.size() - 1 == n)
+			{
+				ss << ']';
+			}
+			else
+			{
+				ss << ", ";
+			}
+		}
+
+		return os << ss.str();
+	}
+
+	return os;
+}
+
+const std::vector<int32_t> subtract(const std::vector<int32_t>& p, const std::vector<int32_t>& q)
+{
+	std::vector<int32_t> r(p);
+	r.resize(std::max(p.size(), q.size()));
+
+	for (size_t n = 0; n < q.size(); ++n)
+	{
+		r.at(q.size() - 1 - n) -= q.at(q.size() - 1 - n);
+	}
+
+	while (r.back() == 0)
+	{
+		r.pop_back();
+	}
+
+	return r;
+
+}
+
+const std::vector<std::complex<long double>> fft(const std::vector<std::complex<long double>>& v, int32_t n, int32_t k = 1)
+{
+	if (abs(n) == abs(k))
+	{
+		return { std::accumulate(v.begin(), v.end(), std::complex<long double>()) };
+	}
+
+	std::array<std::vector<std::complex<long double>>, 2> u { };
+
+	u.at(0).reserve(v.size() + 1);
+	u.at(1).reserve(v.size() + 1);
+
+	for (size_t i = 0; i < v.size(); ++i)
+	{
+		u.at(i % 2).push_back(v.at(i));
+	}
+
+	std::array<std::vector<std::complex<long double>>, 2> w{ fft(u.at(0), n, k << 1), fft(u.at(1), n, k << 1) };
+
+	std::vector<std::complex<long double>> a;
+	a.resize(abs(n / k));
+
+	std::complex<long double> m;
+	for (size_t i = 0, j = a.size() >> 1; i < j; ++i)
+	{
+		m = std::exp(std::complex<long double>(2 * M_PI * k * i / n) * std::complex<long double>(0, 1));
+
+		a.at(i) = a.at(i + j) = m * w.at(1).at(i);
+		a.at(i) = w.at(0).at(i) + a.at(i);
+		a.at(i + j) = w.at(0).at(i) - a.at(i + j);
+	}
+
+	return a;
+}
+
+const std::vector<int32_t> multiply(const std::vector<int32_t> & p, const std::vector<int32_t> & q)
+{
+	int32_t n = 1 << static_cast<int32_t>(log2(p.size() + q.size() - 2) + 1);
+
+	std::vector<std::complex<long double>> a = fft(std::vector<std::complex<long double>>(p.begin(), p.end()), n);
+	std::vector<std::complex<long double>> b = fft(std::vector<std::complex<long double>>(q.begin(), q.end()), n);
+	std::vector<std::complex<long double>> c;
+	std::vector<int32_t> d;
+
+	c.reserve(n);
+	std::transform(a.begin(), a.end(), b.begin(), std::back_inserter(c), std::multiplies<std::complex<long double>>());
+
+	for (const std::complex<long double>& m : fft(c, n, -1))
+	{
+		d.push_back(static_cast<int32_t>(round((m / std::complex<long double>(n)).real())));
+	}
+
+	while (d.back() == 0)
+	{
+		d.pop_back();
+	}
+
+	return d;
+}
+
+const std::vector<int32_t> foil(const std::vector<int32_t>& p, const std::vector<int32_t>& q)
+{
+	std::vector<int32_t> r(p.size() + q.size(), 0);
+
+	for (size_t n = 0; n < p.size(); ++n)
+	{
+		for (size_t m = 0; m < q.size(); ++m)
+		{
+			r.at(n + m) += p.at(n) * q.at(m);
+		}
+	}
+	
+	while (r.back() == 0)
+	{
+		r.pop_back();
+	}
+
+	return r;
+}
+
+const std::vector<int32_t> divide(const std::vector<int32_t> & p, const std::vector<int32_t> & q)
+{
+	std::vector<int32_t> dividend(p);
+	std::vector<int32_t> divisor(q);
+
+	std::vector<int32_t> terms(std::max(dividend.size(), divisor.size()) + 1, 0);
+
+	while ((dividend.size() == divisor.size() && dividend.back() == divisor.back()) ||
+		(dividend.size() > divisor.size() || dividend.back() > divisor.back()))
+	{
+		std::vector<int32_t> term(dividend.size() - divisor.size() + 1, 0);
+		term.at(term.size() - 1) = terms.at(term.size() - 1) = dividend.back() / divisor.back();
+
+		dividend = subtract(dividend, (dividend.size() == divisor.size() ? multiply : foil)(divisor, term));
+
+		while (dividend.back() == 0)
+		{
+			dividend.pop_back();
+		}
+
+		if (dividend.empty())
+		{
+			break;
+		}
+
+	}
+
+	while (terms.back() == 0)
+	{
+		terms.pop_back();
+	}
+
+	return terms;
+}
 
 const std::vector<int32_t> cyclotomic_polynomial(uint32_t N)
 {
 	static std::unordered_map<uint32_t, std::vector<int32_t>> cache;
+
+	if (N == 1)
+	{
+		return std::vector<int32_t>({ 1, -1 });
+	}
+
+	if (cache.count(N) > 0)
+	{
+		return cache.at(N);
+	}
 
 	std::function<bool(int32_t)> prime = [](int32_t p) -> bool
 	{
@@ -20,13 +193,18 @@ const std::vector<int32_t> cyclotomic_polynomial(uint32_t N)
 			return false;
 		}
 
-		if (p == 2)
+		if (p <= 3)
 		{
 			return true;
 		}
 
-		int32_t m = static_cast<int32_t>(sqrt(p));
-		for (int32_t i = 2; i <= m; i++)
+		if (p % 2 == 0)
+		{
+			return false;
+		}
+
+		int32_t m = static_cast<int32_t>(sqrt(p)) + 1;
+		for (int32_t i = 3; i <= m; i += 2)
 		{
 			if (p % i == 0)
 			{
@@ -37,38 +215,23 @@ const std::vector<int32_t> cyclotomic_polynomial(uint32_t N)
 		return true;
 	};
 
-	std::function<bool(int32_t, int32_t)> divisible = [](int32_t n, int32_t m) -> bool
-	{
-		return n % m == 0;
-	};
-
-	std::function<bool(int32_t)> odd = [](int32_t n) -> bool
-	{
-		return n % 2 != 0;
-	};
-
 	std::function<bool(uint32_t, int32_t)> power_of = [](uint32_t x, int32_t p) -> bool
 	{
-		while (((x % p) == 0) && x > 1)
+		while (!(x % p) && x > 1)
 		{
 			x /= p;
 		}
+
 		return x == 1;
 	};
 
-	
-	if (N == 1)
-	{
-		//v = polynomial(std::vector<term>({ term(1, 1), term(-1, 0) })).get_mask();
-		return std::vector<int32_t>({ 1, -1 });
-	}
-
 	std::vector<int32_t> v;
+
 	if (prime(N))
 	{
 		v.resize(N, 1);
 	}
-	else if (divisible(N, 2) && prime(N / 2) && odd(N / 2))
+	else if ((N % 2 == 0) && ((N / 2) % 2 != 0) && prime(N / 2))
 	{
 		int32_t n = N / 2;
 		v.reserve(n);
@@ -79,15 +242,15 @@ const std::vector<int32_t> cyclotomic_polynomial(uint32_t N)
 	}
 	else if (N > 1 && power_of(N, 2))
 	{
-		v.resize(N / 2 + 1);
+		v.resize(static_cast<size_t>(N / 2) + 1);
 
 		v.at(0) = 1;
 		v.at(v.size() - 1) = 1;
 	}
-	else if ((divisible(N, 12) && power_of(N / 12, 2))
-		|| divisible(N, 18) && power_of(N / 18, 2))
+	else if (((N % 12 == 0) && power_of(N / 12, 2))
+		|| (N % 18 == 0) && power_of(N / 18, 2))
 	{
-		v.resize(N / 3 + 1);
+		v.resize(static_cast<size_t>(N / 3) + 1);
 
 		v.at(0) = 1;
 		v.at(v.size() / 2) = -1;
@@ -95,102 +258,53 @@ const std::vector<int32_t> cyclotomic_polynomial(uint32_t N)
 	}
 	else if (std::gcd(N, 9) == 9 && power_of(N, 3))
 	{
-		v.resize(static_cast<int32_t>(N / 1.5) + 1);
+		v.resize(static_cast<size_t>(N / 1.5) + 1);
 
 		v.at(0) = 1;
 		v.at(v.size() / 2) = 1;
 		v.at(v.size() - 1) = 1;
 	}
-	else if (cache.count(N) > 0)
-	{
-		std::cout << "CACHE USED: " << N << std::endl;
-		return cache.at(N);
-	}
 	else
 	{
-
-		polynomial p1(std::vector<term>({ term(1, N), term(-1, 0) }));
-		polynomial p2(std::vector<term>({ term(1, 0) }));
-
+		std::vector<int32_t> p = { 1 };
+	
 		//factors of N
-		std::vector<uint32_t> p2v = [&](uint32_t N) -> const std::vector<uint32_t>
+		for (uint32_t i = 1, n = N / 2; i <= n; ++i)
 		{
-			std::vector<uint32_t> v;
-			uint32_t n = N / 2;
-			for (uint32_t i = 1; i <= n; ++i)
+			if (N % i == 0)
 			{
-				if (divisible(N, i))
-				{
-					v.push_back(i);
-				}
+				std::vector<int32_t> q = cyclotomic_polynomial(i);
+				p = multiply(p, std::vector<int32_t>(q.rbegin(), q.rend()));
 			}
-			return v;
-		}(N);
-
-		for (uint32_t n : p2v)
-		{
-			//TODO: can optimize by creating a std::map for our cyclotomic polynomials so there will be no reason to
-			//recursively call the cyclotomic_polynomial function
-			p2 *= polynomial(cyclotomic_polynomial(n));
 		}
 
-		v = polynomial(p1 / p2).get_mask();
+		std::vector<int32_t> q(static_cast<size_t>(N) + 1, 0);
+
+		q.at(0) = -1;
+		q.at(q.size() - 1) = 1;
+
+		v = divide(q, p);
+		std::reverse(v.begin(), v.end());
 
 		cache.emplace(N, v);
-		std::cout << N << " CALCULATED USING RECURSIVE METHOD." << std::endl;
 	}
 
 	return v;
 }
 
-std::ostream& operator<<(std::ostream &os, const std::vector<int32_t> &v)
-{
-	std::stringstream ss;
-	if (v.size() > 0)
-	{
-		ss << "[";
-
-		for (size_t n = 0; n < v.size(); ++n)
-		{
-			ss << v.at(n);
-			if (v.size() - 1 == n)
-			{
-				ss << "]";
-			}
-			else
-			{
-				ss << ", ";
-			}
-		}
-
-		return os << ss.str() + "\r\n";
-	}
-
-	return os;
-}
 
 int main()
 {
-	/*clock_t begin = clock();
+	auto start = std::chrono::high_resolution_clock::now();
 
-	for (int32_t i = 1; i <= 305; ++i)
+	for (int32_t i = 1; i <= 500; ++i)
 	{
-		std::cout << i << ": " << cyclotomic_polynomial(i);
+		std::cout << i << ": " << cyclotomic_polynomial(i) << '\n';
 	}
 
-	clock_t end = clock();
+	auto end = std::chrono::high_resolution_clock::now();
+
+	std::cout << " -> " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << " ms\n";
 	
-	std::cout << "Elapsed: " <<  double(end - begin) / CLOCKS_PER_SEC << std::endl;
-	*/
-
-	polynomial p1(std::vector<int32_t>({ 0, 0, 1, 3 }));
-	polynomial p2(std::vector<int32_t>({ 0, 2, 0, 2 }));
-
-	auto result1 = polynomial::foil(p1, p2);
-	auto result2 = polynomial::multiply(p1, p2);
-
-	std::cout << result1.get_mask() << std::endl << result2.get_mask();
-
-	getchar();
 	return 0;
 }
