@@ -7,10 +7,10 @@
 #include <sstream>
 #include <iostream>
 #include <functional>
+#include <numeric>
 #include <chrono>
 #include <unordered_map>
 #include <array>
-#include <numeric>
 
 std::ostream& operator<<(std::ostream& os, const std::vector<int32_t>& v)
 {
@@ -40,21 +40,63 @@ std::ostream& operator<<(std::ostream& os, const std::vector<int32_t>& v)
 
 const std::vector<int32_t> subtract(const std::vector<int32_t>& p, const std::vector<int32_t>& q)
 {
-	std::vector<int32_t> r(p);
-	r.resize(std::max(p.size(), q.size()));
+	std::vector<int32_t> v(p);
+	v.resize(std::max(p.size(), q.size()));
 
 	for (size_t n = 0; n < q.size(); ++n)
 	{
-		r.at(q.size() - 1 - n) -= q.at(q.size() - 1 - n);
+		v.at(q.size() - 1 - n) -= q.at(q.size() - 1 - n);
 	}
 
-	while (r.back() == 0)
+	while (!v.empty() && v.back() == 0)
 	{
-		r.pop_back();
+		v.pop_back();
 	}
 
-	return r;
+	return v;
+}
 
+const std::vector<std::complex<long double>> itfft(const std::vector<std::complex<long double>>& v, int32_t n)
+{
+	/* TODO: finish impl iterative fft */
+	
+	std::function<std::vector<std::complex<long double>>(const std::vector<std::complex<long double>>&)> bit_reverse =
+		[](const std::vector<std::complex<long double>> & a) -> std::vector<std::complex<long double>>
+	{
+		std::vector<std::complex<long double>> A;
+
+		for (size_t k = 0; k < a.size(); ++k)
+		{
+			//A.at(k)
+		}
+
+		return A;
+	};
+
+	std::vector<std::complex<long double>> A = bit_reverse(v);
+	for (size_t s = 1, i = static_cast<size_t>(log2(v.size())); s <= i; ++s)
+	{
+		int32_t m = 1 << s; //std::pow(2, s);
+		std::complex<long double> wm = std::complex<long double>(std::exp(-2 * M_PI / m)) * std::complex<long double>(0, 1);
+		
+		for (size_t k = 0; k < v.size(); k += m)
+		{
+			std::complex<long double> w(1);
+
+			for (size_t j = 0, p = m / 2; j < p; ++j)
+			{
+				std::complex<long double> t = w * A.at(k + j + m / 2);
+				std::complex<long double> u = w * A.at(k + j);
+
+				A.at(k + j) = u + t;
+				A.at(k + j + m / 2) = u - t;
+
+				w = w * wm;
+			}
+		}
+	}
+
+	return A;
 }
 
 const std::vector<std::complex<long double>> fft(const std::vector<std::complex<long double>>& v, int32_t n, int32_t k = 1)
@@ -102,6 +144,8 @@ const std::vector<int32_t> multiply(const std::vector<int32_t> & p, const std::v
 	std::vector<int32_t> d;
 
 	c.reserve(n);
+
+	/* for (size_t i = 0; i < n; ++i) { c.push_back(a.at(i) * b.at(i)); } */
 	std::transform(a.begin(), a.end(), b.begin(), std::back_inserter(c), std::multiplies<std::complex<long double>>());
 
 	for (const std::complex<long double>& m : fft(c, n, -1))
@@ -109,7 +153,7 @@ const std::vector<int32_t> multiply(const std::vector<int32_t> & p, const std::v
 		d.push_back(static_cast<int32_t>(round((m / std::complex<long double>(n)).real())));
 	}
 
-	while (d.back() == 0)
+	while (!d.empty() && d.back() == 0)
 	{
 		d.pop_back();
 	}
@@ -117,59 +161,59 @@ const std::vector<int32_t> multiply(const std::vector<int32_t> & p, const std::v
 	return d;
 }
 
-const std::vector<int32_t> foil(const std::vector<int32_t>& p, const std::vector<int32_t>& q)
+const std::vector<int32_t> multiply_v1(const std::vector<int32_t>& p, const std::vector<int32_t>& q)
 {
-	std::vector<int32_t> r(p.size() + q.size(), 0);
+	/* this version of multiply uses the foil method */
+	std::vector<int32_t> v(p.size() + q.size(), 0);
 
 	for (size_t n = 0; n < p.size(); ++n)
 	{
 		for (size_t m = 0; m < q.size(); ++m)
 		{
-			r.at(n + m) += p.at(n) * q.at(m);
+			v.at(n + m) += p.at(n) * q.at(m);
 		}
 	}
 	
-	while (r.back() == 0)
+	while (!v.empty() && v.back() == 0)
 	{
-		r.pop_back();
+		v.pop_back();
 	}
 
-	return r;
+	return v;
 }
 
-const std::vector<int32_t> divide(const std::vector<int32_t> & p, const std::vector<int32_t> & q)
+const std::vector<int32_t> divide_v1(std::vector<int32_t> p, std::vector<int32_t> q)
 {
-	std::vector<int32_t> dividend(p);
-	std::vector<int32_t> divisor(q);
+	/* p denotes dividend, q denotes divisor */
+	std::vector<int32_t> terms(std::max(p.size(), q.size()) + 1, 0);
 
-	std::vector<int32_t> terms(std::max(dividend.size(), divisor.size()) + 1, 0);
-
-	while ((dividend.size() == divisor.size() && dividend.back() == divisor.back()) ||
-		(dividend.size() > divisor.size() || dividend.back() > divisor.back()))
+	while ((p.size() == q.size() && p.back() == q.back()) ||
+		(p.size() > q.size() || p.back() > q.back()))
 	{
-		std::vector<int32_t> term(dividend.size() - divisor.size() + 1, 0);
-		term.at(term.size() - 1) = terms.at(term.size() - 1) = dividend.back() / divisor.back();
+		std::vector<int32_t> term(p.size() - q.size() + 1, 0);
+		term.at(term.size() - 1) = terms.at(term.size() - 1) = p.back() / q.back();
 
-		dividend = subtract(dividend, (dividend.size() == divisor.size() ? multiply : foil)(divisor, term));
-
-		while (dividend.back() == 0)
-		{
-			dividend.pop_back();
-		}
-
-		if (dividend.empty())
+		p = subtract(p, (p.size() == q.size() ? multiply : multiply_v1)(q, term));
+		
+		if (p.empty())
 		{
 			break;
 		}
 
 	}
 
-	while (terms.back() == 0)
+	while (!terms.empty() && terms.back() == 0)
 	{
 		terms.pop_back();
 	}
 
 	return terms;
+}
+
+const std::vector<int32_t> divide(const std::vector<int32_t>& p, const std::vector<int32_t>& q)
+{
+	/* TODO: impl fft fast polynomial division */
+	return divide_v1(p, q);
 }
 
 const std::vector<int32_t> cyclotomic_polynomial(uint32_t N)
@@ -248,7 +292,7 @@ const std::vector<int32_t> cyclotomic_polynomial(uint32_t N)
 		v.at(v.size() - 1) = 1;
 	}
 	else if (((N % 12 == 0) && power_of(N / 12, 2))
-		|| (N % 18 == 0) && power_of(N / 18, 2))
+		|| ((N % 18 == 0) && power_of(N / 18, 2)))
 	{
 		v.resize(static_cast<size_t>(N / 3) + 1);
 
@@ -292,7 +336,6 @@ const std::vector<int32_t> cyclotomic_polynomial(uint32_t N)
 	return v;
 }
 
-
 int main()
 {
 	auto start = std::chrono::high_resolution_clock::now();
@@ -305,6 +348,6 @@ int main()
 	auto end = std::chrono::high_resolution_clock::now();
 
 	std::cout << " -> " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << " ms\n";
-	
+
 	return 0;
 }
