@@ -170,9 +170,6 @@ def cyclotomic_polynomial(N):
     
 
 def main():
-    print(subtract([9, -10, 7, 6],[-5, 4, 0, -2]))
-    print(multiply_v1([9, -10, 7, 6],[-5, 4, 0, -2]))
-
     start = time.time()
     for i in range(1, 501):
         print(str(i) + ':', cyclotomic_polynomial(i))
