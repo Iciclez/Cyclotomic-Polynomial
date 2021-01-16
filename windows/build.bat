@@ -1,1 +1,0 @@
-cl /EHsc /std:c++17 /O2 /Oi ../cyclotomic_polynomial.cpp
